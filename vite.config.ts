@@ -16,6 +16,8 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
       },
       plugins: [react()],
+      base: './', 
+        // 👈 加上這一行，確保使用相對路徑加載資源
       define: {
         // 保持你原本的 API_KEY 設定
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
