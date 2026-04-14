@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Task, AuditLog, UserRole, Meeting, Contact, TaskStatus, ChecklistItem, ChecklistSubmission, Asset, AssetCheckRecord, AssetCheckBatch, Message } from './types';
+import { User, Task, AuditLog, UserRole, Meeting, Contact, TaskStatus, ChecklistItem, ChecklistSubmission, Asset, AssetCheckRecord, AssetCheckBatch, Message, EmailTemplate } from './types';
 import { STATIONS, APP_CONFIG, getStationCodeByName } from './constants';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -116,6 +116,7 @@ const App: React.FC = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetCheckRecords, setAssetCheckRecords] = useState<AssetCheckRecord[]>([]);
   const [assetCheckBatches, setAssetCheckBatches] = useState<AssetCheckBatch[]>([]);
+  const [emailTemplate, setEmailTemplate] = useState<EmailTemplate>({ subject: '歡迎加入基隆市停車場履約管理系統', body: '親愛的 {{name}} 您好，\n\n您的帳號已核准啟用。\n\n登入帳號：{{email}}\n預設密碼：{{password}}\n\n請點擊下方連結登入系統，並於首次登入後修改密碼：\nhttps://ais-dev-54rnuxl6wlar5opqz6lzeh-91234977477.asia-northeast1.run.app\n\n祝您工作順利！' });
   
   const [checklistTemplate, setChecklistTemplate] = useState<ChecklistItem[]>([]);
   const [checklistSubmissions, setChecklistSubmissions] = useState<ChecklistSubmission[]>([]);
@@ -171,6 +172,7 @@ const App: React.FC = () => {
     if (activeTab === 'admin' && canAccessAdminPanel(currentUser)) { 
       fetchLogs(); 
       fetchContacts(); 
+      fetchEmailTemplate();
       // 進入後台時重新抓取受保護的使用者名單
       fetchProtectedUsers();
     }
@@ -449,6 +451,75 @@ const App: React.FC = () => {
     } catch(err) { alert("儲存失敗"); }
   };
 
+  const fetchEmailTemplate = async () => {
+    if (!currentUser || !canAccessAdminPanel(currentUser)) return;
+    try {
+      const res = await fetch(`${APP_CONFIG.SCRIPT_URL}?action=getEmailTemplate&userEmail=${currentUser.email}&token=${currentUser.password}`);
+      const result = await res.json();
+      if (result.success && result.data) {
+        setEmailTemplate(result.data);
+      }
+    } catch (err) { console.error("抓取郵件範本失敗", err); }
+  };
+
+  const handleSaveEmailTemplate = async (template: EmailTemplate) => {
+    if (!currentUser || !isAdmin(currentUser)) return;
+    try {
+      const res = await fetch(APP_CONFIG.SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'saveEmailTemplate',
+          adminEmail: currentUser.email,
+          token: currentUser.password,
+          template
+        })
+      });
+      const result = await res.json();
+      if (result.success) {
+        setEmailTemplate(template);
+        alert("郵件範本已儲存");
+      } else {
+        alert("儲存失敗: " + result.msg);
+      }
+    } catch (err) { alert("儲存失敗，請檢查連線"); }
+  };
+
+  const handleSendWelcomeEmail = async (targetEmail: string, name: string, tempPassword: string) => {
+    if (!currentUser || !isAdmin(currentUser)) return;
+    try {
+      // 1. 發送 Email
+      const res = await fetch(APP_CONFIG.SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'sendWelcomeEmail',
+          adminEmail: currentUser.email,
+          token: currentUser.password,
+          targetEmail,
+          name,
+          tempPassword,
+          template: emailTemplate
+        })
+      });
+      const result = await res.json();
+
+      // 2. 發送站內私訊 (Message Center)
+      const welcomeContent = emailTemplate.body
+        .replace(/{{name}}/g, name)
+        .replace(/{{email}}/g, targetEmail)
+        .replace(/{{password}}/g, tempPassword);
+      
+      await handleSendMessage(targetEmail, `【歡迎加入】${emailTemplate.subject}\n\n${welcomeContent}`);
+
+      if (result.success) {
+        console.log("歡迎信件與站內訊息已發送");
+      } else {
+        console.error("發送歡迎信件失敗: " + result.msg);
+      }
+    } catch (err) { console.error("發送歡迎信件連線錯誤", err); }
+  };
+
   const handleUpdateUser = async (email: string, updates: Partial<User>): Promise<boolean> => {
     if (!currentUser || !isAdmin(currentUser)) return false;
     try {
@@ -666,7 +737,7 @@ const App: React.FC = () => {
     } catch (err) { console.error("Mark read error", err); }
   };
 
-  const handleSendMessage = async (receiverEmail: string, content: string): Promise<boolean> => {
+  const handleSendMessage = async (receiverEmail: string, content: string, type: string = 'private'): Promise<boolean> => {
     if (!currentUser) return false;
     try {
       const res = await fetch(APP_CONFIG.SCRIPT_URL, {
@@ -678,7 +749,7 @@ const App: React.FC = () => {
           token: currentUser.password,
           receiverEmail: receiverEmail,
           content: content,
-          type: 'private'
+          type: type
         })
       });
       const result = await res.json();
@@ -949,6 +1020,9 @@ const App: React.FC = () => {
           onViewDetail={setViewingTask} 
           contacts={contacts} 
           onSaveContact={handleSaveContact} 
+          emailTemplate={emailTemplate}
+          onSaveEmailTemplate={handleSaveEmailTemplate}
+          onSendWelcomeEmail={handleSendWelcomeEmail}
         />
       )}
       
