@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Task, TaskStatus } from '../types';
 import { X, Save, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
+import DeleteRecurrenceModal, { DeleteRecurrenceMode } from './DeleteRecurrenceModal';
 
 interface ModifyTaskModalProps {
   task: Task | null;
   isOpen: boolean;
   onClose: () => void;
   onUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>;
-  onDelete: (taskId: string) => Promise<void>;
+  onDelete: (taskId: string, mode?: DeleteRecurrenceMode) => Promise<void>;
 }
 
 const ModifyTaskModal: React.FC<ModifyTaskModalProps> = ({ task, isOpen, onClose, onUpdate, onDelete }) => {
@@ -15,12 +16,14 @@ const ModifyTaskModal: React.FC<ModifyTaskModalProps> = ({ task, isOpen, onClose
   const [deadline, setDeadline] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRecurrenceDelete, setShowRecurrenceDelete] = useState(false);
 
   useEffect(() => {
     if (task) {
       setItemName(task.itemName || '');
       setDeadline(task.deadline || '');
       setShowDeleteConfirm(false);
+      setShowRecurrenceDelete(false);
     }
   }, [task]);
 
@@ -40,6 +43,28 @@ const ModifyTaskModal: React.FC<ModifyTaskModalProps> = ({ task, isOpen, onClose
     } catch (error) {
       console.error("Update task error:", error);
       alert("更新失敗");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteClick = () => {
+    if (task.recurrenceGroupId) {
+      setShowRecurrenceDelete(true);
+    } else {
+      setShowDeleteConfirm(true);
+    }
+  };
+
+  const handleRecurrenceDeleteConfirm = async (mode: DeleteRecurrenceMode) => {
+    setIsSubmitting(true);
+    try {
+      await onDelete(task.uid, mode);
+      setShowRecurrenceDelete(false);
+      onClose();
+    } catch (error) {
+      console.error("Delete recurrence error:", error);
+      alert("刪除失敗");
     } finally {
       setIsSubmitting(false);
     }
@@ -123,7 +148,7 @@ const ModifyTaskModal: React.FC<ModifyTaskModalProps> = ({ task, isOpen, onClose
                 <div className="border-t pt-4 mt-2">
                   <button
                     type="button"
-                    onClick={() => setShowDeleteConfirm(true)}
+                    onClick={handleDeleteClick}
                     className="w-full py-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors flex items-center justify-center font-medium border border-red-100"
                     disabled={isSubmitting}
                   >
@@ -165,6 +190,12 @@ const ModifyTaskModal: React.FC<ModifyTaskModalProps> = ({ task, isOpen, onClose
             </div>
           )}
         </div>
+
+        <DeleteRecurrenceModal 
+          isOpen={showRecurrenceDelete}
+          onClose={() => setShowRecurrenceDelete(false)}
+          onConfirm={handleRecurrenceDeleteConfirm}
+        />
       </div>
     </div>
   );
