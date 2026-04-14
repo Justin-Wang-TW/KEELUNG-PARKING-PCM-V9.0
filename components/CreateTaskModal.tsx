@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { StationCode, TaskStatus } from '../types';
+import { StationCode, TaskStatus, RecurrenceType } from '../types';
 import { STATIONS } from '../constants';
-import { X, Globe, AlertCircle } from 'lucide-react';
+import { X, Globe, AlertCircle, Repeat } from 'lucide-react';
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -13,6 +13,8 @@ interface CreateTaskModalProps {
     deadline: string; 
     stationCodes: StationCode[]; 
     isCommon: boolean;
+    recurrence: RecurrenceType;
+    recurrenceCount: number;
   }) => void;
 }
 
@@ -21,6 +23,8 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
   const [deadline, setDeadline] = useState('');
   const [isCommon, setIsCommon] = useState(false);
   const [selectedStations, setSelectedStations] = useState<StationCode[]>([]);
+  const [recurrence, setRecurrence] = useState<RecurrenceType>(RecurrenceType.NONE);
+  const [recurrenceCount, setRecurrenceCount] = useState(1);
 
   if (!isOpen) return null;
 
@@ -54,7 +58,9 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
       title: itemName,   // 兼容性修正：後端可能使用 .title
       deadline,
       stationCodes: targetStations,
-      isCommon
+      isCommon,
+      recurrence,
+      recurrenceCount
     });
     
     // Reset form
@@ -62,6 +68,8 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
     setDeadline('');
     setIsCommon(false);
     setSelectedStations([]);
+    setRecurrence(RecurrenceType.NONE);
+    setRecurrenceCount(1);
     onClose();
   };
 
@@ -132,6 +140,48 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               onChange={(e) => setDeadline(e.target.value)}
               className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             />
+          </div>
+
+          {/* Recurrence Settings */}
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center">
+              <Repeat className="w-4 h-4 mr-1 text-gray-600"/>
+              重複設定
+            </label>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">重複週期</label>
+                <select
+                  value={recurrence}
+                  onChange={(e) => setRecurrence(e.target.value as RecurrenceType)}
+                  className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value={RecurrenceType.NONE}>不重複</option>
+                  <option value={RecurrenceType.MONTHLY}>每月重複一次</option>
+                  <option value={RecurrenceType.QUARTERLY}>每季重複一次</option>
+                  <option value={RecurrenceType.SEMI_ANNUALLY}>每半年重複一次</option>
+                  <option value={RecurrenceType.ANNUALLY}>每年重複一次</option>
+                </select>
+              </div>
+              {recurrence !== RecurrenceType.NONE && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">重複次數</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    value={recurrenceCount}
+                    onChange={(e) => setRecurrenceCount(parseInt(e.target.value) || 1)}
+                    className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+              )}
+            </div>
+            {recurrence !== RecurrenceType.NONE && (
+              <p className="text-[10px] text-gray-500 mt-2">
+                系統將根據截止日期自動生成後續 {recurrenceCount} 個週期的任務。
+              </p>
+            )}
           </div>
 
           {/* Station Selector (Disabled if Common) */}
