@@ -18,6 +18,14 @@ export interface Station {
   name: string;
 }
 
+export enum RecurrenceType {
+  NONE = 'NONE',
+  MONTHLY = 'MONTHLY',
+  QUARTERLY = 'QUARTERLY',
+  SEMI_ANNUALLY = 'SEMI_ANNUALLY',
+  ANNUALLY = 'ANNUALLY',
+}
+
 export interface Task {
   uid: string;
   stationCode: StationCode;
@@ -29,6 +37,8 @@ export interface Task {
   executorEmail: string;
   lastUpdated: string; 
   attachmentUrl?: string;
+  recurrence?: RecurrenceType;
+  recurrenceGroupId?: string; // To group recurring tasks together
 }
 
 /**
