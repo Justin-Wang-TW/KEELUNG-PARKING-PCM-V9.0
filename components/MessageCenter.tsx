@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Send, User as UserIcon, Bell, CheckCircle, MessageSquare, Filter } from 'lucide-react';
-import { Message, MessageType, User } from '../types';
+import { Message, MessageType, User, UserRole } from '../types';
 
 interface MessageCenterProps {
   isOpen: boolean;
@@ -9,7 +9,7 @@ interface MessageCenterProps {
   users: User[];
   currentUser: User;
   onMarkAsRead: (messageId: string) => void;
-  onSendMessage: (receiverEmail: string, content: string) => Promise<boolean>;
+  onSendMessage: (receiverEmail: string, content: string, type?: string) => Promise<boolean>;
 }
 
 const MessageCenter: React.FC<MessageCenterProps> = ({
@@ -32,7 +32,8 @@ const MessageCenter: React.FC<MessageCenterProps> = ({
   const handleSend = async () => {
     if (!newMsgReceiver || !newMsgContent.trim()) return;
     setSending(true);
-    const success = await onSendMessage(newMsgReceiver, newMsgContent);
+    const type = newMsgReceiver === 'ALL' ? 'broadcast' : 'private';
+    const success = await onSendMessage(newMsgReceiver, newMsgContent, type);
     setSending(false);
     if (success) {
       setIsComposing(false);
@@ -104,6 +105,9 @@ const MessageCenter: React.FC<MessageCenterProps> = ({
                   onChange={(e) => setNewMsgReceiver(e.target.value)}
                 >
                   <option value="">選擇使用者...</option>
+                  {(currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER_3D || currentUser.role === UserRole.MANAGER_DEPT) && (
+                    <option value="ALL" className="font-bold text-blue-600">【全體人員】發送通告</option>
+                  )}
                   {users.filter(u => u.email !== currentUser.email).map(u => (
                     <option key={u.email} value={u.email}>
                       {u.name} ({u.role})
