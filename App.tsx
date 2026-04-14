@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Task, AuditLog, UserRole, Meeting, Contact, TaskStatus, ChecklistItem, ChecklistSubmission, Asset, AssetCheckRecord, AssetCheckBatch, Message, EmailTemplate } from './types';
+import { User, Task, AuditLog, UserRole, Meeting, Contact, TaskStatus, ChecklistItem, ChecklistSubmission, Asset, AssetCheckRecord, AssetCheckBatch, Message, EmailTemplate, RecurrenceType } from './types';
 import { STATIONS, APP_CONFIG, getStationCodeByName } from './constants';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -18,6 +18,7 @@ import AssetManagement from './components/AssetManagement';
 import MessageCenter from './components/MessageCenter';
 import { sha256 } from './utils';
 import ErrorBoundary from './components/ErrorBoundary';
+import { DeleteRecurrenceMode } from './components/DeleteRecurrenceModal';
 import './index.css';
 
 import SessionTimeoutModal from './components/SessionTimeoutModal';
@@ -574,22 +575,59 @@ const App: React.FC = () => {
 
   const handleCreateTask = async (taskData: any) => {
     if (!currentUser || (!isAdmin(currentUser) && !isManager3D(currentUser) && currentUser.role !== UserRole.MANAGER_DEPT)) return;
+    
     try {
-      const res = await fetch(APP_CONFIG.SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ 
-          action: 'createTask', 
-          adminEmail: currentUser.email, 
-          token: currentUser.password, // ⚡ 加入 Token
-          taskData 
-        })
-      });
-      const result = await res.json();
-      if (result.success) {
-        alert("工項發佈成功");
+      const { recurrence, recurrenceCount, deadline, ...rest } = taskData;
+      const tasksToCreate = [];
+      const recurrenceGroupId = recurrence !== RecurrenceType.NONE ? `REC_${Date.now()}` : undefined;
+
+      if (recurrence && recurrence !== RecurrenceType.NONE) {
+        const baseDate = new Date(deadline);
+        for (let i = 0; i < recurrenceCount; i++) {
+          const newDeadline = new Date(baseDate);
+          if (recurrence === RecurrenceType.MONTHLY) {
+            newDeadline.setMonth(baseDate.getMonth() + i);
+          } else if (recurrence === RecurrenceType.QUARTERLY) {
+            newDeadline.setMonth(baseDate.getMonth() + i * 3);
+          } else if (recurrence === RecurrenceType.SEMI_ANNUALLY) {
+            newDeadline.setMonth(baseDate.getMonth() + i * 6);
+          } else if (recurrence === RecurrenceType.ANNUALLY) {
+            newDeadline.setFullYear(baseDate.getFullYear() + i);
+          }
+          
+          tasksToCreate.push({
+            ...rest,
+            deadline: newDeadline.toISOString().split('T')[0],
+            recurrence,
+            recurrenceGroupId
+          });
+        }
+      } else {
+        tasksToCreate.push({ ...rest, deadline });
+      }
+
+      let allSuccess = true;
+      for (const data of tasksToCreate) {
+        const res = await fetch(APP_CONFIG.SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ 
+            action: 'createTask', 
+            adminEmail: currentUser.email, 
+            token: currentUser.password,
+            taskData: data 
+          })
+        });
+        const result = await res.json();
+        if (!result.success) allSuccess = false;
+      }
+
+      if (allSuccess) {
+        alert(tasksToCreate.length > 1 ? `已成功發佈 ${tasksToCreate.length} 個週期的工項` : "工項發佈成功");
         const filter = currentUser.assignedStation === 'ALL' ? '全部' : STATIONS.find(s => s.code === currentUser.assignedStation)?.name || '全部';
         fetchTasks(filter);
+      } else {
+        alert("部分工項發佈失敗，請檢查網路或聯繫管理員");
       }
     } catch (err) { alert("發佈失敗"); }
   };
@@ -660,7 +698,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteTask = async (taskId: string) => {
+  const handleDeleteTask = async (taskId: string, mode: DeleteRecurrenceMode = 'THIS') => {
     if (!currentUser) return;
     try {
       const response = await fetch(APP_CONFIG.SCRIPT_URL, {
@@ -670,12 +708,13 @@ const App: React.FC = () => {
           action: 'deleteTask',
           userEmail: currentUser.email,
           token: currentUser.password,
-          uid: taskId
+          uid: taskId,
+          mode: mode
         })
       });
       const result = await response.json();
       if (result.success) {
-        alert("工項已成功刪除");
+        alert(mode === 'THIS' ? "工項已成功刪除" : "相關週期工項已成功刪除");
         const filter = currentUser.assignedStation === 'ALL' ? '全部' : STATIONS.find(s => s.code === currentUser.assignedStation)?.name || '全部';
         fetchTasks(filter);
       } else {
@@ -697,7 +736,8 @@ const App: React.FC = () => {
         setTasks(taskList.map((row: any[]) => ({
           uid: row[0], stationName: row[1], stationCode: getStationCodeByName(row[1]),
           itemCode: row[2], itemName: row[3], deadline: row[4], status: row[5],
-          executorEmail: row[6], lastUpdated: row[7], attachmentUrl: row[8]
+          executorEmail: row[6], lastUpdated: row[7], attachmentUrl: row[8],
+          recurrence: row[9], recurrenceGroupId: row[10]
         })));
       } else {
         setTasks([]);
