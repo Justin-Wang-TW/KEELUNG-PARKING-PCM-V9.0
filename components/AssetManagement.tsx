@@ -55,6 +55,7 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
 
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [checkingAsset, setCheckingAsset] = useState<Asset | null>(null);
+  const [previewPhoto, setPreviewPhoto] = useState<{ url: string, title: string } | null>(null);
   const [checkRecord, setCheckRecord] = useState<Partial<AssetCheckRecord>>({});
   const [selectedAssetHistory, setSelectedAssetHistory] = useState<Asset | null>(null);
 
@@ -866,11 +867,14 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
                               </span>
                             </div>
                             {asset.photoUrl && (
-                              <a href={asset.photoUrl} target="_blank" rel="noopener noreferrer" className="ml-2 flex-shrink-0">
-                                <div className="w-12 h-12 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center overflow-hidden">
+                              <button 
+                                onClick={() => setPreviewPhoto({ url: asset.photoUrl!, title: asset.name })}
+                                className="ml-2 flex-shrink-0"
+                              >
+                                <div className="w-12 h-12 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center overflow-hidden hover:border-blue-500 transition-colors">
                                   <img src={asset.photoUrl} alt={asset.name} className="w-full h-full object-cover" />
                                 </div>
-                              </a>
+                              </button>
                             )}
                           </div>
                           
@@ -993,9 +997,13 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
                           <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title={asset.note}>{asset.note || '-'}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {asset.photoUrl ? (
-                              <a href={asset.photoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800" title="查看照片">
+                              <button 
+                                onClick={() => setPreviewPhoto({ url: asset.photoUrl!, title: asset.name })}
+                                className="text-blue-600 hover:text-blue-800" 
+                                title="預覽照片"
+                              >
                                 <ImageIcon className="w-5 h-5" />
-                              </a>
+                              </button>
                             ) : (
                               <span className="text-gray-400">-</span>
                             )}
@@ -1111,9 +1119,12 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
                                         </div>
                                         {result.note && <p className="text-xs text-gray-600 mt-1">備註: {result.note}</p>}
                                         {result.photoUrl && (
-                                          <a href={result.photoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs mt-1 block hover:underline">
-                                            查看照片
-                                          </a>
+                                          <button 
+                                            onClick={() => setPreviewPhoto({ url: result.photoUrl!, title: result.assetName })}
+                                            className="text-blue-600 text-xs mt-1 block hover:underline"
+                                          >
+                                            預覽照片
+                                          </button>
                                         )}
                                       </div>
                                     ))}
@@ -1279,11 +1290,14 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
                           {record.note && <p className="text-sm text-gray-600 mt-1">備註: {record.note}</p>}
                         </div>
                         {record.photoUrl && (
-                          <a href={record.photoUrl} target="_blank" rel="noopener noreferrer" className="block w-20 h-20 flex-shrink-0">
+                          <button 
+                            onClick={() => setPreviewPhoto({ url: record.photoUrl!, title: record.assetName })}
+                            className="block w-20 h-20 flex-shrink-0"
+                          >
                             <div className="w-full h-full bg-gray-100 rounded-lg flex items-center justify-center border border-gray-200 hover:border-blue-500">
                               <ImageIcon className="w-8 h-8 text-gray-400" />
                             </div>
-                          </a>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -1725,6 +1739,43 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Photo Preview Modal */}
+      {previewPhoto && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-[100] p-4"
+          onClick={() => setPreviewPhoto(null)}
+        >
+          <div className="relative max-w-5xl w-full max-h-full flex flex-col items-center">
+            <button 
+              onClick={() => setPreviewPhoto(null)}
+              className="absolute -top-12 right-0 text-white hover:text-gray-300 flex items-center gap-2"
+            >
+              <span className="text-sm">關閉</span>
+              <X className="w-8 h-8" />
+            </button>
+            <div className="bg-white p-2 rounded-lg shadow-2xl max-h-[80vh] overflow-hidden">
+              <img 
+                src={previewPhoto.url} 
+                alt={previewPhoto.title} 
+                className="max-w-full max-h-[75vh] object-contain"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+            <div className="mt-4 text-white text-center">
+              <h4 className="text-lg font-bold">{previewPhoto.title}</h4>
+              <a 
+                href={previewPhoto.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                在新視窗開啟原始圖片
+              </a>
             </div>
           </div>
         </div>
