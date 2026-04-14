@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { User, AuditLog, UserRole, StationCode, Task, Contact, ROLE_LABELS } from '../types';
-import { Shield, Users, FileText, Search, Activity, Lock, Unlock, X, ListTodo, Plus, Contact as ContactIcon, Check, Copy, Key, Loader2, AlertTriangle, UserCheck, Building2, ShieldAlert, UserPlus, Trash2 } from 'lucide-react';
+import { User, AuditLog, UserRole, StationCode, Task, Contact, ROLE_LABELS, EmailTemplate } from '../types';
+import { Shield, Users, FileText, Search, Activity, Lock, Unlock, X, ListTodo, Plus, Contact as ContactIcon, Check, Copy, Key, Loader2, AlertTriangle, UserCheck, Building2, ShieldAlert, UserPlus, Trash2, Mail, Info, Send } from 'lucide-react';
 import { STATIONS } from '../constants';
 import TaskList from './TaskList';
 import CreateTaskModal from './CreateTaskModal';
@@ -21,6 +21,9 @@ interface AdminPanelProps {
   onViewDetail: (task: Task) => void; 
   contacts: Contact[];
   onSaveContact: (contact: Partial<Contact>) => Promise<void>;
+  emailTemplate: EmailTemplate;
+  onSaveEmailTemplate: (template: EmailTemplate) => Promise<void>;
+  onSendWelcomeEmail: (email: string, name: string, password: string) => Promise<void>;
 }
 
 const AdminPanel: React.FC<AdminPanelProps> = ({ 
@@ -35,10 +38,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   onCreateTask,
   onViewDetail,
   contacts = [],
-  onSaveContact
+  onSaveContact,
+  emailTemplate,
+  onSaveEmailTemplate,
+  onSendWelcomeEmail
 }) => {
   // 新增 'pending' 頁籤類型
-  const [activeTab, setActiveTab] = useState<'tasks' | 'pending' | 'users' | 'logs' | 'contacts'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'pending' | 'users' | 'logs' | 'contacts' | 'emailTemplate'>('tasks');
+  
+  // 郵件範本編輯 State
+  const [editingTemplate, setEditingTemplate] = useState<EmailTemplate>(emailTemplate);
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [userSearch, setUserSearch] = useState('');
   const [logSearch, setLogSearch] = useState('');
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
@@ -116,6 +126,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
         forceChangePassword: true
       });
       if (success) {
+        // 自動發送歡迎信件
+        onSendWelcomeEmail(approvingUser.email, approvingUser.name, tempPassword);
+        
         setCreatedCredentials({ name: approvingUser.name, email: approvingUser.email, password: tempPassword });
         setApprovingUser(null);
       } else {
@@ -169,6 +182,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
           <button onClick={() => setActiveTab('logs')} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center transition-all ${activeTab === 'logs' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-50'}`}>
             <FileText className="w-4 h-4 mr-2" /> 系統操作日誌
           </button>
+
+          {isAdmin && (
+            <button onClick={() => { setActiveTab('emailTemplate'); setEditingTemplate(emailTemplate); }} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center transition-all ${activeTab === 'emailTemplate' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-50'}`}>
+              <Mail className="w-4 h-4 mr-2" /> 歡迎信件設定
+            </button>
+          )}
         </div>
       </div>
 
@@ -433,6 +452,116 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                   )))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'emailTemplate' && isAdmin && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-fade-in">
+          <div className="p-6 border-b bg-gray-50 flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-gray-800 flex items-center">
+                <Mail className="w-5 h-5 mr-2 text-purple-600" />
+                歡迎信件範本設定
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">設定新用戶核准後自動發送的歡迎信件內容</p>
+            </div>
+            <button 
+              onClick={async () => {
+                setIsSavingTemplate(true);
+                await onSaveEmailTemplate(editingTemplate);
+                setIsSavingTemplate(false);
+              }}
+              disabled={isSavingTemplate}
+              className="flex items-center px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-md disabled:opacity-50"
+            >
+              {isSavingTemplate ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}
+              儲存範本
+            </button>
+          </div>
+          
+          <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="space-y-6">
+              <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg">
+                <div className="flex items-start">
+                  <Info className="w-5 h-5 text-blue-500 mr-3 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-bold text-blue-800">可用變數說明</h4>
+                    <p className="text-xs text-blue-700 mt-1 leading-relaxed">
+                      您可以在內文中使用以下標籤，系統發送時會自動替換為實際資料：
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <div className="bg-white/60 px-2 py-1 rounded text-[11px] font-mono text-blue-800 border border-blue-100">
+                        <span className="font-bold">{"{{name}}"}</span> : 使用者姓名
+                      </div>
+                      <div className="bg-white/60 px-2 py-1 rounded text-[11px] font-mono text-blue-800 border border-blue-100">
+                        <span className="font-bold">{"{{email}}"}</span> : 登入帳號
+                      </div>
+                      <div className="bg-white/60 px-2 py-1 rounded text-[11px] font-mono text-blue-800 border border-blue-100">
+                        <span className="font-bold">{"{{password}}"}</span> : 隨機預設密碼
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">信件主旨</label>
+                  <input 
+                    type="text" 
+                    value={editingTemplate.subject}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, subject: e.target.value })}
+                    placeholder="請輸入信件主旨..."
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">信件內文</label>
+                  <textarea 
+                    rows={12}
+                    value={editingTemplate.body}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, body: e.target.value })}
+                    placeholder="請輸入信件內文..."
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none transition-all font-sans leading-relaxed"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gray-50 rounded-xl border border-dashed border-gray-300 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center">
+                  <Search className="w-4 h-4 mr-2" />
+                  即時預覽 (範例)
+                </h4>
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 rounded-full bg-red-400"></div>
+                  <div className="w-2 h-2 rounded-full bg-yellow-400"></div>
+                  <div className="w-2 h-2 rounded-full bg-green-400"></div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 border-b bg-gray-50 text-xs text-gray-500">
+                  <div className="mb-1"><span className="font-bold">收件者：</span> 新用戶 (newuser@example.com)</div>
+                  <div><span className="font-bold">主旨：</span> {editingTemplate.subject}</div>
+                </div>
+                <div className="p-6 text-sm text-gray-800 whitespace-pre-wrap min-h-[300px] leading-relaxed">
+                  {editingTemplate.body
+                    .replace(/\{\{name\}\}/g, '王小明')
+                    .replace(/\{\{email\}\}/g, 'newuser@example.com')
+                    .replace(/\{\{password\}\}/g, 'Abc12345')
+                  }
+                </div>
+                <div className="px-6 py-4 border-t bg-gray-50 flex justify-end">
+                  <div className="flex items-center text-[10px] text-gray-400">
+                    <Send className="w-3 h-3 mr-1" />
+                    此為系統自動發送之信件
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
