@@ -253,6 +253,7 @@ export interface Message {
   senderEmail: string;
   senderName: string;
   receiverEmail: string;
+  receiverName?: string;
   content: string;
   type: MessageType;
   relatedId?: string; // e.g., Task UID
