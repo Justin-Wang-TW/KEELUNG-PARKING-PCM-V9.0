@@ -260,6 +260,11 @@ export interface Message {
   timestamp: string;
 }
 
+export interface EmailTemplate {
+  subject: string;
+  body: string;
+}
+
 declare global {
   interface Window {
     google?: {
