@@ -8,8 +8,7 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     
     return {
-      // 關鍵修正：設定基礎路徑，確保 GitHub Pages 能正確找到靜態資源
-      base: '/KEELUNG-PARKING-PCM/',
+
       
       server: {
         port: 3000,
