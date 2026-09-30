@@ -227,9 +227,21 @@ const TaskList: React.FC<TaskListProps> = ({ tasks = [], currentUser, onEditTask
                 </h3>
                 
                 {task.attachmentUrl && (
-                  <div className="text-blue-500 text-xs flex items-center mb-3 font-medium bg-blue-50 p-1.5 rounded w-fit">
-                      <Paperclip className="w-3 h-3 mr-1" />
-                      已上傳佐證資料
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {task.attachmentUrl.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map((url, uIdx, arr) => (
+                      <a
+                        key={uIdx}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 border border-blue-200 transition-colors shadow-2xs"
+                        title={url}
+                      >
+                        <Paperclip className="w-3 h-3 mr-1 text-blue-500 shrink-0" />
+                        <span>{arr.length > 1 ? `佐證 ${uIdx + 1}` : '檢視佐證'}</span>
+                      </a>
+                    ))}
                   </div>
                 )}
 
@@ -316,10 +328,22 @@ const TaskList: React.FC<TaskListProps> = ({ tasks = [], currentUser, onEditTask
                              {task.itemName || <span className="text-gray-300 italic font-normal text-sm">(未填寫工項名稱)</span>}
                            </div>
                            {task.attachmentUrl && (
-                               <div className="text-blue-500 text-xs flex items-center font-medium">
-                                  <Paperclip className="w-3 h-3 mr-1" />
-                                  已上傳佐證資料
-                               </div>
+                             <div className="flex flex-wrap gap-1.5 mt-1.5">
+                               {task.attachmentUrl.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map((url, uIdx, arr) => (
+                                 <a 
+                                   key={uIdx}
+                                   href={url}
+                                   target="_blank"
+                                   rel="noopener noreferrer"
+                                   onClick={(e) => e.stopPropagation()}
+                                   className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 border border-blue-200 transition-colors shadow-2xs"
+                                   title={url}
+                                 >
+                                   <Paperclip className="w-3 h-3 mr-1 text-blue-500 shrink-0" />
+                                   <span>{arr.length > 1 ? `佐證 ${uIdx + 1}` : '檢視佐證'}</span>
+                                 </a>
+                               ))}
+                             </div>
                            )}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap align-top">

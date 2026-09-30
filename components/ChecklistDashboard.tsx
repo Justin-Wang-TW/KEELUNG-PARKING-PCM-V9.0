@@ -589,15 +589,20 @@ const ChecklistDashboard: React.FC<ChecklistDashboardProps> = ({
                                         <td className="p-3 text-gray-600 align-top break-all">{res.note || '-'}</td>
                                         <td className="p-3 text-right align-top">
                                           {res.photoUrl ? (
-                                            <a 
-                                              href={res.photoUrl} 
-                                              target="_blank" 
-                                              rel="noopener noreferrer"
-                                              className="inline-flex items-center text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 border border-blue-200 transition-colors"
-                                            >
-                                              <ImageIcon className="w-3 h-3 mr-1" />
-                                              檢視照片
-                                            </a>
+                                            <div className="flex flex-wrap justify-end gap-1">
+                                              {res.photoUrl.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map((url, pIdx, arr) => (
+                                                <a 
+                                                  key={pIdx}
+                                                  href={url} 
+                                                  target="_blank" 
+                                                  rel="noopener noreferrer"
+                                                  className="inline-flex items-center text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 border border-blue-200 transition-colors whitespace-nowrap"
+                                                >
+                                                  <ImageIcon className="w-3 h-3 mr-1" />
+                                                  {arr.length > 1 ? `照片 ${pIdx + 1}` : '檢視照片'}
+                                                </a>
+                                              ))}
+                                            </div>
                                           ) : (
                                             <span className="text-gray-300 text-xs">-</span>
                                           )}

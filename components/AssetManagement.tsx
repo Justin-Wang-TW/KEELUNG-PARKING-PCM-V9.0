@@ -10,10 +10,10 @@ interface AssetManagementProps {
   checkRecords: AssetCheckRecord[];
   checkBatches?: AssetCheckBatch[];
   onDelete: (id: string) => Promise<void>;
-  onSubmitCheck: (record: Partial<AssetCheckRecord>, file?: { name: string, type: string, content: string }) => Promise<void>;
-  onSaveBatch?: (batch: Partial<AssetCheckBatch>, files?: { [key: string]: { name: string, type: string, content: string } }) => Promise<void>;
-  onSaveBatchAssets?: (items: { asset: Partial<Asset>, file?: { name: string, type: string, content: string } }[]) => Promise<void>;
-  onEdit?: (asset: Partial<Asset>, file?: { name: string, type: string, content: string }) => Promise<void>;
+  onSubmitCheck: (record: Partial<AssetCheckRecord>, file?: { name: string, type: string, content: string }, files?: { name: string, type: string, content: string }[]) => Promise<void>;
+  onSaveBatch?: (batch: Partial<AssetCheckBatch>, files?: { [key: string]: { name: string, type: string, content: string } | { name: string, type: string, content: string }[] }) => Promise<void>;
+  onSaveBatchAssets?: (items: { asset: Partial<Asset>, file?: { name: string, type: string, content: string }, files?: { name: string, type: string, content: string }[] }[]) => Promise<void>;
+  onEdit?: (asset: Partial<Asset>, file?: { name: string, type: string, content: string }, files?: { name: string, type: string, content: string }[]) => Promise<void>;
 }
 
 interface BatchAssetItem {
@@ -28,6 +28,7 @@ interface BatchAssetItem {
   quantity: number;
   note: string;
   file?: { name: string, type: string, content: string };
+  files?: { name: string, type: string, content: string }[];
 }
 
 const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, checkRecords, checkBatches = [], onDelete, onSubmitCheck, onSaveBatch, onSaveBatchAssets, onEdit }) => {
@@ -73,12 +74,13 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
     stationCode: StationCode.BAIFU,
     results: {}
   });
-  const [batchFiles, setBatchFiles] = useState<{ [assetId: string]: { name: string, type: string, content: string } }>({});
+  const [batchFiles, setBatchFiles] = useState<{ [assetId: string]: { name: string, type: string, content: string }[] }>({});
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
 
   const [filterStation, setFilterStation] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFile, setSelectedFile] = useState<{ name: string, type: string, content: string } | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<{ name: string, type: string, content: string }[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
   // Determine available stations for the current user
@@ -174,6 +176,7 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
   const handleEdit = (asset: Asset) => {
     setEditingAsset(asset);
     setSelectedFile(null);
+    setSelectedFiles([]);
     setIsEditModalOpen(true);
   };
 
@@ -183,10 +186,11 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
 
     setIsUploading(true);
     try {
-      await onEdit(editingAsset, selectedFile || undefined);
+      await onEdit(editingAsset, selectedFiles[0] || selectedFile || undefined, selectedFiles.length > 0 ? selectedFiles : undefined);
       setIsEditModalOpen(false);
       setEditingAsset(null);
       setSelectedFile(null);
+      setSelectedFiles([]);
     } catch (error) {
       console.error("Update asset failed", error);
       alert("更新失敗");
@@ -229,19 +233,55 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
   };
 
   const handleCurrentItemFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
-        const content = base64String.split(',')[1];
+    if (e.target.files && e.target.files.length > 0) {
+      const incoming = Array.from(e.target.files);
+      const existing = currentBatchItem.files || (currentBatchItem.file ? [currentBatchItem.file] : []);
+      const remaining = 15 - existing.length;
+      if (remaining <= 0) {
+        alert('每次最多可上傳 15 個檔案');
+        return;
+      }
+      const filesToProcess = incoming.slice(0, remaining);
+      if (incoming.length > remaining) {
+        alert('每次最多可上傳 15 個檔案，超過部分已略過。');
+      }
+
+      Promise.all(
+        filesToProcess.map(file => {
+          return new Promise<{ name: string, type: string, content: string }>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64String = reader.result as string;
+              const content = base64String.split(',')[1] || '';
+              resolve({
+                name: file.name,
+                type: file.type,
+                content: content
+              });
+            };
+            reader.readAsDataURL(file);
+          });
+        })
+      ).then(newItems => {
+        const combined = [...existing, ...newItems];
         setCurrentBatchItem(prev => ({
           ...prev,
-          file: { name: file.name, type: file.type, content }
+          file: combined[0] || undefined,
+          files: combined
         }));
-      };
-      reader.readAsDataURL(file);
+      });
+      e.target.value = '';
     }
+  };
+
+  const handleRemoveCurrentItemFile = (index: number) => {
+    const existing = currentBatchItem.files || (currentBatchItem.file ? [currentBatchItem.file] : []);
+    const updated = existing.filter((_, i) => i !== index);
+    setCurrentBatchItem(prev => ({
+      ...prev,
+      file: updated[0] || undefined,
+      files: updated
+    }));
   };
 
   const handleAddToQueue = () => {
@@ -289,6 +329,7 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
     try {
       const itemsToSave = batchAddItems.map(item => {
         const station = STATIONS.find(s => s.code === item.stationCode);
+        const itemFiles = item.files || (item.file ? [item.file] : undefined);
         return {
           asset: {
             stationCode: item.stationCode,
@@ -302,7 +343,8 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
             quantity: item.quantity,
             note: item.note
           },
-          file: item.file
+          file: itemFiles && itemFiles.length > 0 ? itemFiles[0] : item.file,
+          files: itemFiles
         };
       });
 
@@ -344,43 +386,104 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
-        const content = base64String.split(',')[1];
-        setSelectedFile({
-          name: file.name,
-          type: file.type,
-          content: content
+    if (e.target.files && e.target.files.length > 0) {
+      const incoming = Array.from(e.target.files);
+      const remaining = 15 - selectedFiles.length;
+      if (remaining <= 0) {
+        alert('每次最多可上傳 15 個檔案');
+        return;
+      }
+      const filesToProcess = incoming.slice(0, remaining);
+      if (incoming.length > remaining) {
+        alert('每次最多可上傳 15 個檔案，超過部分已略過。');
+      }
+
+      Promise.all(
+        filesToProcess.map(file => {
+          return new Promise<{ name: string, type: string, content: string }>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64String = reader.result as string;
+              const content = base64String.split(',')[1] || '';
+              resolve({
+                name: file.name,
+                type: file.type,
+                content: content
+              });
+            };
+            reader.readAsDataURL(file);
+          });
+        })
+      ).then(newItems => {
+        setSelectedFiles(prev => {
+          const combined = [...prev, ...newItems];
+          if (!selectedFile && combined.length > 0) {
+            setSelectedFile(combined[0]);
+          }
+          return combined;
         });
-      };
-      reader.readAsDataURL(file);
+      });
+      e.target.value = '';
     }
+  };
+
+  const handleRemoveSelectedFile = (index: number) => {
+    setSelectedFiles(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      setSelectedFile(updated[0] || null);
+      return updated;
+    });
   };
 
   const handleBatchFileChange = (assetId: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
-        const content = base64String.split(',')[1];
+    if (e.target.files && e.target.files.length > 0) {
+      const incoming = Array.from(e.target.files);
+      const existing = batchFiles[assetId] || [];
+      const remaining = 15 - existing.length;
+      if (remaining <= 0) {
+        alert('每次最多可上傳 15 個檔案');
+        return;
+      }
+      const filesToProcess = incoming.slice(0, remaining);
+      if (incoming.length > remaining) {
+        alert('每次最多可上傳 15 個檔案，超過部分已略過。');
+      }
+
+      Promise.all(
+        filesToProcess.map(file => {
+          return new Promise<{ name: string, type: string, content: string }>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64String = reader.result as string;
+              const content = base64String.split(',')[1] || '';
+              resolve({
+                name: file.name,
+                type: file.type,
+                content: content
+              });
+            };
+            reader.readAsDataURL(file);
+          });
+        })
+      ).then(newItems => {
         setBatchFiles(prev => ({
           ...prev,
-          [assetId]: {
-            name: file.name,
-            type: file.type,
-            content: content
-          }
+          [assetId]: [...(prev[assetId] || []), ...newItems]
         }));
-      };
-      reader.readAsDataURL(file);
+      });
+      e.target.value = '';
     }
   };
 
-  // Removed handleSubmitAsset
+  const handleRemoveBatchFile = (assetId: string, index: number) => {
+    setBatchFiles(prev => {
+      const current = prev[assetId] || [];
+      return {
+        ...prev,
+        [assetId]: current.filter((_, i) => i !== index)
+      };
+    });
+  };
 
   const handleSubmitCheck = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -388,11 +491,12 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
 
     setIsUploading(true);
     try {
-      await onSubmitCheck(checkRecord, selectedFile || undefined);
+      await onSubmitCheck(checkRecord, selectedFiles[0] || selectedFile || undefined, selectedFiles.length > 0 ? selectedFiles : undefined);
       setIsCheckModalOpen(false);
       setCheckingAsset(null);
       setCheckRecord({});
       setSelectedFile(null);
+      setSelectedFiles([]);
     } catch (error) {
       console.error("Check submission failed", error);
       alert("提交失敗");
@@ -654,13 +758,31 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
                               result.status !== AssetCheckStatus.NORMAL && !result.note ? 'border-red-300 focus:ring-red-500' : 'border-gray-300'
                             }`}
                           />
-                          <div className="flex items-center gap-2">
-                            <label className="cursor-pointer flex items-center px-3 py-1 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-xs font-medium text-gray-700">
-                              <Upload className="w-3 h-3 mr-1" />
-                              {batchFiles[asset.id] ? '更換照片' : '上傳照片'}
-                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleBatchFileChange(asset.id, e)} />
-                            </label>
-                            {batchFiles[asset.id] && <span className="text-xs text-gray-500 truncate">{batchFiles[asset.id].name}</span>}
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center gap-2">
+                              {(!batchFiles[asset.id] || batchFiles[asset.id].length < 15) && (
+                                <label className="cursor-pointer flex items-center px-3 py-1 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-xs font-medium text-gray-700">
+                                  <Upload className="w-3 h-3 mr-1" />
+                                  {batchFiles[asset.id]?.length > 0 ? '繼續加入' : '上傳照片'}
+                                  <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleBatchFileChange(asset.id, e)} />
+                                </label>
+                              )}
+                              {batchFiles[asset.id]?.length > 0 && (
+                                <span className="text-xs text-blue-600 font-medium">已選 {batchFiles[asset.id].length}/15 張</span>
+                              )}
+                            </div>
+                            {batchFiles[asset.id]?.length > 0 && (
+                              <div className="flex flex-wrap gap-1 max-w-xs">
+                                {batchFiles[asset.id].map((f, fIdx) => (
+                                  <span key={fIdx} className="inline-flex items-center gap-1 text-[11px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
+                                    <span className="truncate max-w-[90px]">{f.name}</span>
+                                    <button type="button" onClick={() => handleRemoveBatchFile(asset.id, fIdx)} className="text-red-500 hover:text-red-700 ml-0.5">
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1210,16 +1332,33 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">檢核照片</label>
-                <div className="flex items-center space-x-2">
-                  <label className="cursor-pointer flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700">
-                    <Upload className="w-4 h-4 mr-2" />
-                    上傳照片
-                    <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-                  </label>
-                  <span className="text-sm text-gray-500 truncate max-w-[200px]">
-                    {selectedFile ? selectedFile.name : '未選擇檔案'}
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-medium text-gray-700">檢核照片</label>
+                  <span className="text-xs text-blue-600 font-medium">
+                    {selectedFiles.length > 0 ? `已選取 ${selectedFiles.length}/15 張` : '最多 15 張，不限大小'}
                   </span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {selectedFiles.length < 15 && (
+                    <label className="cursor-pointer inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700 w-fit">
+                      <Upload className="w-4 h-4 mr-2" />
+                      {selectedFiles.length > 0 ? '繼續選取照片' : '上傳照片'}
+                      <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
+                    </label>
+                  )}
+                  {selectedFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1.5 bg-gray-50 rounded border border-gray-200">
+                      {selectedFiles.map((f, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-gray-200 text-xs shadow-xs">
+                          <ImageIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          <span className="truncate max-w-[120px] text-gray-700">{f.name}</span>
+                          <button type="button" onClick={() => handleRemoveSelectedFile(idx)} className="text-red-500 hover:text-red-700 ml-1">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1437,25 +1576,40 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">照片</label>
-                  <div className="flex items-center gap-3">
-                    <label className="cursor-pointer flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
-                      <Upload className="w-4 h-4 mr-2" />
-                      {selectedFile ? '更換檔案' : '上傳新照片'}
-                      <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-                    </label>
-                    {selectedFile ? (
-                      <span className="text-sm text-green-600 flex items-center">
-                        <ClipboardCheck className="w-4 h-4 mr-1" />
-                        {selectedFile.name}
-                      </span>
-                    ) : editingAsset.photoUrl ? (
-                      <span className="text-sm text-blue-600 flex items-center">
-                        <ImageIcon className="w-4 h-4 mr-1" />
-                        已有照片 (上傳新照片將會覆蓋)
-                      </span>
-                    ) : (
-                      <span className="text-sm text-gray-400">未選擇檔案</span>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-sm font-medium text-gray-700">照片</label>
+                    <span className="text-xs text-blue-600 font-medium">
+                      {selectedFiles.length > 0 ? `已選取 ${selectedFiles.length}/15 張` : '最多 15 張，不限大小'}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-3">
+                      {selectedFiles.length < 15 && (
+                        <label className="cursor-pointer flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
+                          <Upload className="w-4 h-4 mr-2" />
+                          {selectedFiles.length > 0 ? '繼續選取照片' : '上傳新照片'}
+                          <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
+                        </label>
+                      )}
+                      {selectedFiles.length === 0 && editingAsset.photoUrl && (
+                        <span className="text-sm text-blue-600 flex items-center">
+                          <ImageIcon className="w-4 h-4 mr-1" />
+                          已有照片 (上傳新照片將會覆蓋)
+                        </span>
+                      )}
+                    </div>
+                    {selectedFiles.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1.5 bg-gray-50 rounded border border-gray-200">
+                        {selectedFiles.map((f, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-gray-200 text-xs shadow-xs">
+                            <ImageIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                            <span className="truncate max-w-[120px] text-gray-700">{f.name}</span>
+                            <button type="button" onClick={() => handleRemoveSelectedFile(idx)} className="text-red-500 hover:text-red-700 ml-1">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1612,20 +1766,34 @@ const AssetManagement: React.FC<AssetManagementProps> = ({ currentUser, assets, 
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">照片 (Photo)</label>
-                    <div className="flex items-center gap-3">
-                      <label className="cursor-pointer flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
-                        <Upload className="w-4 h-4 mr-2" />
-                        {currentBatchItem.file ? '更換檔案' : '選擇檔案'}
-                        <input type="file" accept="image/*" className="hidden" onChange={handleCurrentItemFileChange} />
-                      </label>
-                      {currentBatchItem.file ? (
-                        <span className="text-sm text-green-600 flex items-center">
-                          <ClipboardCheck className="w-4 h-4 mr-1" />
-                          {currentBatchItem.file.name}
-                        </span>
-                      ) : (
-                        <span className="text-sm text-gray-400">未選擇檔案</span>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-sm font-medium text-gray-700">照片 (Photo)</label>
+                      <span className="text-xs text-blue-600 font-medium">
+                        {(currentBatchItem.files?.length || (currentBatchItem.file ? 1 : 0)) > 0 
+                          ? `已選取 ${currentBatchItem.files?.length || 1}/15 張` 
+                          : '最多 15 張，不限大小'}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {(!currentBatchItem.files || currentBatchItem.files.length < 15) && (
+                        <label className="cursor-pointer inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors w-fit">
+                          <Upload className="w-4 h-4 mr-2" />
+                          {currentBatchItem.files && currentBatchItem.files.length > 0 ? '繼續選取' : '選擇檔案'}
+                          <input type="file" multiple accept="image/*" className="hidden" onChange={handleCurrentItemFileChange} />
+                        </label>
+                      )}
+                      {currentBatchItem.files && currentBatchItem.files.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1.5 bg-gray-50 rounded border border-gray-200">
+                          {currentBatchItem.files.map((f, idx) => (
+                            <div key={idx} className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-gray-200 text-xs shadow-xs">
+                              <ImageIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                              <span className="truncate max-w-[120px] text-gray-700">{f.name}</span>
+                              <button type="button" onClick={() => handleRemoveCurrentItemFile(idx)} className="text-red-500 hover:text-red-700 ml-1">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>

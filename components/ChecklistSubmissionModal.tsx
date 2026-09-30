@@ -20,7 +20,7 @@ const ChecklistSubmissionModal: React.FC<ChecklistSubmissionModalProps> = ({
   const [yearMonth, setYearMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [answers, setAnswers] = useState<Record<string, CheckStatus>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [files, setFiles] = useState<Record<string, File | null>>({}); // State for files
+  const [files, setFiles] = useState<Record<string, File[]>>({}); // State for up to 15 files per item
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
 
@@ -61,12 +61,25 @@ const ChecklistSubmissionModal: React.FC<ChecklistSubmissionModalProps> = ({
     setNotes(prev => ({ ...prev, [itemId]: note }));
   };
 
-  const handleFileChange = (itemId: string, file: File | null) => {
-    if (file && file.size > 5 * 1024 * 1024) {
-      alert("單張照片大小請勿超過 5MB");
-      return;
-    }
-    setFiles(prev => ({ ...prev, [itemId]: file }));
+  const handleFileChange = (itemId: string, newFiles: FileList | null) => {
+    if (!newFiles || newFiles.length === 0) return;
+    const incoming = Array.from(newFiles);
+    setFiles(prev => {
+      const existing = prev[itemId] || [];
+      const combined = [...existing, ...incoming];
+      if (combined.length > 15) {
+        alert("單一項目最多可上傳 15 張照片，已為您保留前 15 張。");
+        return { ...prev, [itemId]: combined.slice(0, 15) };
+      }
+      return { ...prev, [itemId]: combined };
+    });
+  };
+
+  const handleRemoveSingleFile = (itemId: string, index: number) => {
+    setFiles(prev => {
+      const existing = prev[itemId] || [];
+      return { ...prev, [itemId]: existing.filter((_, i) => i !== index) };
+    });
   };
 
   // Helper to convert file to base64
@@ -97,17 +110,17 @@ const ChecklistSubmissionModal: React.FC<ChecklistSubmissionModalProps> = ({
     try {
       // Process files and build results array
       const resultsPromises = template.map(async (t) => {
-        let fileData = undefined;
-        const file = files[t.id];
-        
-        if (file) {
-          const base64 = await fileToBase64(file);
-          fileData = {
-            name: file.name,
-            type: file.type,
-            content: base64
-          };
-        }
+        const itemFiles = files[t.id] || [];
+        const filesData = await Promise.all(
+          itemFiles.map(async (file) => {
+            const base64 = await fileToBase64(file);
+            return {
+              name: file.name,
+              type: file.type,
+              content: base64
+            };
+          })
+        );
 
         return {
           itemId: t.id,
@@ -115,7 +128,8 @@ const ChecklistSubmissionModal: React.FC<ChecklistSubmissionModalProps> = ({
           content: t.content,   
           status: answers[t.id],
           note: notes[t.id] || '',
-          file: fileData // Pass file data to backend
+          file: filesData[0] || undefined,
+          files: filesData
         };
       });
 
@@ -132,7 +146,7 @@ const ChecklistSubmissionModal: React.FC<ChecklistSubmissionModalProps> = ({
       onClose();
     } catch (error) {
       console.error(error);
-      alert("提交失敗，請檢查網路連線或檔案大小");
+      alert("提交失敗，請檢查網路連線或檔案狀態");
     } finally {
       setIsSubmitting(false);
     }
@@ -226,7 +240,7 @@ const ChecklistSubmissionModal: React.FC<ChecklistSubmissionModalProps> = ({
                         <div className="divide-y divide-gray-100">
                           {catItems.map(item => {
                               const status = answers[item.id] || CheckStatus.OK;
-                              const currentFile = files[item.id];
+                              const currentFiles = files[item.id] || [];
 
                               return (
                               <div key={item.id} className={`p-4 ${status === CheckStatus.ISSUE ? 'bg-red-50' : 'bg-white'}`}>
@@ -261,21 +275,30 @@ const ChecklistSubmissionModal: React.FC<ChecklistSubmissionModalProps> = ({
                                               <div className="relative shrink-0">
                                                   <input 
                                                       type="file" 
+                                                      multiple
                                                       id={`file-${item.id}`} 
                                                       className="hidden" 
                                                       accept="image/*"
-                                                      onChange={(e) => handleFileChange(item.id, e.target.files?.[0] || null)}
+                                                      onChange={(e) => {
+                                                        handleFileChange(item.id, e.target.files);
+                                                        e.target.value = '';
+                                                      }}
                                                   />
                                                   <label 
                                                       htmlFor={`file-${item.id}`}
-                                                      className={`flex items-center justify-center p-2 rounded cursor-pointer border transition-colors ${
-                                                          currentFile 
+                                                      className={`flex items-center justify-center p-2 rounded cursor-pointer border transition-colors relative ${
+                                                          currentFiles.length > 0 
                                                           ? 'bg-blue-100 text-blue-600 border-blue-300' 
                                                           : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50'
                                                       }`}
-                                                      title="上傳照片"
+                                                      title={`上傳照片 (最多 15 張，目前已選 ${currentFiles.length})`}
                                                   >
                                                       <Camera className="w-4 h-4" />
+                                                      {currentFiles.length > 0 && (
+                                                        <span className="absolute -top-1.5 -right-1.5 bg-blue-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                                                          {currentFiles.length}
+                                                        </span>
+                                                      )}
                                                   </label>
                                               </div>
 
@@ -293,19 +316,23 @@ const ChecklistSubmissionModal: React.FC<ChecklistSubmissionModalProps> = ({
                                               />
                                           </div>
 
-                                          {/* File Preview Label */}
-                                          {currentFile && (
-                                              <div className="flex justify-end">
-                                                  <div className="flex items-center gap-2 bg-blue-50 px-2 py-1 rounded border border-blue-100 max-w-full">
-                                                      <ImageIcon className="w-3 h-3 text-blue-500" />
-                                                      <span className="text-xs text-blue-700 truncate max-w-[150px]">{currentFile.name}</span>
-                                                      <button 
-                                                          onClick={() => handleFileChange(item.id, null)}
-                                                          className="text-red-500 hover:text-red-700"
-                                                      >
-                                                          <Trash2 className="w-3 h-3" />
-                                                      </button>
-                                                  </div>
+                                          {/* File Preview Chips */}
+                                          {currentFiles.length > 0 && (
+                                              <div className="flex flex-wrap gap-1.5 justify-end">
+                                                  {currentFiles.map((file, fIdx) => (
+                                                    <div key={fIdx} className="flex items-center gap-1.5 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 text-xs">
+                                                        <ImageIcon className="w-3 h-3 text-blue-500 shrink-0" />
+                                                        <span className="text-blue-700 truncate max-w-[120px]">{file.name}</span>
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => handleRemoveSingleFile(item.id, fIdx)}
+                                                            className="text-red-400 hover:text-red-700 ml-0.5 p-0.5"
+                                                            title="移除此照片"
+                                                        >
+                                                            <Trash2 className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                  ))}
                                               </div>
                                           )}
                                       </div>

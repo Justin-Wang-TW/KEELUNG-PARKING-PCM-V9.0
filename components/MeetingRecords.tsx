@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Meeting, User, StationCode, UserRole } from '../types';
 import { STATIONS } from '../constants';
-import { FileText, Plus, Download, Calendar, User as UserIcon, Search, Paperclip, X, Loader2 } from 'lucide-react';
+import { FileText, Plus, Download, Calendar, User as UserIcon, Search, Paperclip, X, Loader2, Trash2 } from 'lucide-react';
 
 interface MeetingRecordsProps {
   meetings: Meeting[];
   currentUser: User;
-  // Updated signature to accept file metadata
-  onSave: (meeting: Partial<Meeting>, fileData?: { name: string, type: string, content: string }) => Promise<void>;
+  // Updated signature to accept file metadata and files array up to 15
+  onSave: (
+    meeting: Partial<Meeting>, 
+    fileData?: { name: string, type: string, content: string },
+    filesData?: { name: string, type: string, content: string }[]
+  ) => Promise<void>;
 }
 
 const MeetingRecords: React.FC<MeetingRecordsProps> = ({ meetings = [], currentUser, onSave }) => {
@@ -24,8 +28,27 @@ const MeetingRecords: React.FC<MeetingRecordsProps> = ({ meetings = [], currentU
   const [subject, setSubject] = useState('');
   const [summary, setSummary] = useState('');
   const [stationCode, setStationCode] = useState<string>('ALL');
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const incoming = Array.from(e.target.files);
+      setFiles(prev => {
+        const combined = [...prev, ...incoming];
+        if (combined.length > 15) {
+          alert('每次最多可上傳 15 個檔案，已為您保留前 15 個。');
+          return combined.slice(0, 15);
+        }
+        return combined;
+      });
+      e.target.value = '';
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
 
   // Initialize filters based on user role
   useEffect(() => {
@@ -95,27 +118,26 @@ const MeetingRecords: React.FC<MeetingRecordsProps> = ({ meetings = [], currentU
     setIsLoading(true);
 
     try {
-      let fileData = undefined;
+      let filesData: { name: string, type: string, content: string }[] | undefined = undefined;
       
-      // 處理檔案
-      if (file) {
-        if (file.size > 10 * 1024 * 1024) {
-             alert("檔案過大，請選擇 10MB 以下的檔案。");
-             setIsLoading(false);
-             return;
-        }
-        const base64Content = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.readAsDataURL(file);
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = error => reject(error);
-        });
+      // 處理檔案 (最多 15 個，無大小限制)
+      if (files.length > 0) {
+        filesData = await Promise.all(
+          files.map(async (f) => {
+            const base64Content = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.readAsDataURL(f);
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = error => reject(error);
+            });
 
-        fileData = {
-            name: file.name,
-            type: file.type,
-            content: base64Content
-        };
+            return {
+              name: f.name,
+              type: f.type,
+              content: base64Content
+            };
+          })
+        );
       }
 
       await onSave({
@@ -123,8 +145,7 @@ const MeetingRecords: React.FC<MeetingRecordsProps> = ({ meetings = [], currentU
         subject,
         summary,
         stationCode, // Save station code
-        // attachmentUrl is not needed here, backend will generate it
-      }, fileData);
+      }, filesData?.[0], filesData);
 
       setIsCreateModalOpen(false);
       // 重置表單
@@ -132,9 +153,9 @@ const MeetingRecords: React.FC<MeetingRecordsProps> = ({ meetings = [], currentU
       setSubject('');
       setSummary('');
       setStationCode('ALL');
-      setFile(null);
+      setFiles([]);
     } catch (err) {
-      alert("儲存失敗，請檢查網路連線或檔案大小");
+      alert("儲存失敗，請檢查網路連線或檔案狀態");
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -240,6 +261,24 @@ const MeetingRecords: React.FC<MeetingRecordsProps> = ({ meetings = [], currentU
                    <p className="text-gray-500 text-sm break-all line-clamp-2">
                      {truncateText(meeting.summary, 50)}
                    </p>
+                   {meeting.attachmentUrl && (
+                     <div className="flex flex-wrap gap-1.5 mt-2.5">
+                       {meeting.attachmentUrl.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map((url, uIdx, arr) => (
+                         <a
+                           key={uIdx}
+                           href={url}
+                           target="_blank"
+                           rel="noreferrer"
+                           onClick={(e) => e.stopPropagation()}
+                           className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
+                           title={url}
+                         >
+                           <Paperclip className="w-3 h-3 mr-1 text-blue-500 shrink-0" />
+                           <span>{arr.length > 1 ? `附件 ${uIdx + 1}` : '佐證附件'}</span>
+                         </a>
+                       ))}
+                     </div>
+                   )}
                 </div>
                 {meeting.attachmentUrl && (
                   <div className="flex flex-col items-center justify-center pl-2 border-l border-gray-100">
@@ -308,20 +347,53 @@ const MeetingRecords: React.FC<MeetingRecordsProps> = ({ meetings = [], currentU
                  />
                </div>
                <div>
-                 <label className="block text-sm font-bold text-gray-700 mb-1">附件上傳 (選填)</label>
-                 <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <Paperclip className={`w-8 h-8 mb-2 ${file ? 'text-blue-500' : 'text-gray-400'}`} />
-                        <p className="text-sm text-gray-500 font-medium">{file ? file.name : '點擊選取檔案'}</p>
-                        <p className="text-xs text-gray-400 mt-1">PDF, Word, 或圖片 (Max 10MB)</p>
+                 <div className="flex justify-between items-center mb-1">
+                    <label className="block text-sm font-bold text-gray-700">附件上傳 (選填)</label>
+                    <span className="text-xs text-blue-600 font-medium">
+                      {files.length > 0 ? `已選取 ${files.length}/15 個檔案` : '最多 15 個檔案，不限大小'}
+                    </span>
+                  </div>
+                  {files.length < 15 && (
+                    <label className="flex flex-col items-center justify-center w-full min-h-[5.5rem] border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors p-3">
+                       <div className="flex flex-col items-center justify-center text-center">
+                           <Paperclip className={`w-6 h-6 mb-1 ${files.length > 0 ? 'text-blue-500' : 'text-gray-400'}`} />
+                           <p className="text-xs text-gray-600 font-medium">
+                             {files.length > 0 ? '點擊繼續選取檔案 (支援批次選擇)' : '點擊選取檔案 (支援批次選擇)'}
+                           </p>
+                           <p className="text-[11px] text-gray-400 mt-0.5">PDF, Word, 或圖片 (最多 15 個，不限大小)</p>
+                       </div>
+                       <input 
+                          type="file" 
+                          multiple
+                          className="hidden" 
+                          accept="image/*,.pdf,.doc,.docx"
+                          onChange={handleFileChange} 
+                       />
+                    </label>
+                  )}
+                  {files.length > 0 && (
+                    <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
+                      {files.map((f, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-xs bg-gray-50 p-2 rounded border border-gray-200">
+                          <div className="flex items-center space-x-2 truncate">
+                            <Paperclip className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                            <span className="text-gray-700 truncate font-medium">{f.name}</span>
+                            <span className="text-gray-400 shrink-0">
+                              ({f.size > 1024 * 1024 ? `${(f.size / (1024 * 1024)).toFixed(2)} MB` : `${(f.size / 1024).toFixed(1)} KB`})
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeFile(idx)}
+                            className="text-gray-400 hover:text-red-500 ml-2 shrink-0 p-1"
+                            title="移除此檔案"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                    <input 
-                       type="file" 
-                       className="hidden" 
-                       accept="image/*,.pdf,.doc,.docx"
-                       onChange={(e) => setFile(e.target.files?.[0] || null)} 
-                    />
-                 </label>
+                  )}
                </div>
                <div className="pt-4 flex justify-end space-x-2">
                  <button type="button" disabled={isLoading} onClick={() => setIsCreateModalOpen(false)} className="px-4 py-2 bg-gray-100 rounded text-gray-700">取消</button>
@@ -364,16 +436,21 @@ const MeetingRecords: React.FC<MeetingRecordsProps> = ({ meetings = [], currentU
                </div>
              </div>
              <div className="p-4 border-t bg-gray-50 rounded-b-xl flex justify-between items-center">
-               <div>
+               <div className="flex-1 mr-4">
                   {viewingMeeting.attachmentUrl ? (
-                    <a 
-                      href={viewingMeeting.attachmentUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-medium text-sm"
-                    >
-                      <Download className="w-4 h-4 mr-2" /> 下載佐證附件
-                    </a>
+                    <div className="flex flex-wrap gap-2">
+                      {viewingMeeting.attachmentUrl.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map((url, uIdx, arr) => (
+                        <a 
+                          key={uIdx}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-medium text-xs whitespace-nowrap"
+                        >
+                          <Download className="w-3.5 h-3.5 mr-1" /> {arr.length > 1 ? `下載附件 (${uIdx + 1})` : '下載佐證附件'}
+                        </a>
+                      ))}
+                    </div>
                   ) : (
                     <span className="text-sm text-gray-400 flex items-center">
                       <Paperclip className="w-4 h-4 mr-2" /> 無附件資料

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User } from '../types';
 import { APP_CONFIG } from '../constants';
 import { Loader2, UserPlus, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { sha256 } from '../utils';
+import { sha256, fetchJsonSafe } from '../utils';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -51,8 +51,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister, onForgotPassword, us
       const hashedPassword = await sha256(password);
 
       // ⚡ 直接向 GAS 發送驗證請求，讓後端比對雜湊密碼
-      const response = await fetch(APP_CONFIG.SCRIPT_URL, {
+      const { ok, data: result, error } = await fetchJsonSafe(APP_CONFIG.SCRIPT_URL, {
         method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
           action: 'checkUserAuth',
           userEmail: email.trim().toLowerCase(),
@@ -60,7 +61,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister, onForgotPassword, us
         })
       });
 
-      const result = await response.json();
+      if (!ok || !result) {
+        setErrorMsg(error || '連線失敗，請檢查網路或 API URL 設定。');
+        return;
+      }
 
       if (result.success) {
         // 登入成功：將後端回傳的 User 物件（包含 forceChangePassword 旗標）傳給 App

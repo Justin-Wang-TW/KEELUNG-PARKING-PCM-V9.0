@@ -2,10 +2,11 @@
 import React, { useState, useEffect } from 'react';
 import { Task, User, TaskStatus, AuditLog } from '../types';
 import { STATUS_COLORS, APP_CONFIG, STATIONS } from '../constants';
+import { fetchJsonSafe } from '../utils';
 import { 
   X, FileText, Download, User as UserIcon, Calendar, 
   MapPin, Paperclip, Clock, Send, Loader2, CheckCircle2, History,
-  MessageSquare, AlertCircle
+  MessageSquare, AlertCircle, Trash2
 } from 'lucide-react';
 
 interface TaskDetailModalProps {
@@ -13,19 +14,20 @@ interface TaskDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: User | null;
-  // Updated signature: onSave now accepts optional new file data
+  // Updated signature to accept multiple files up to 15
   onSave: (
     taskId: string, 
     newStatus: TaskStatus, 
     currentAttachmentUrl?: string,
-    newFile?: { name: string, type: string, content: string }
+    newFile?: { name: string, type: string, content: string },
+    newFiles?: { name: string, type: string, content: string }[]
   ) => Promise<void>; 
 }
 
 const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose, currentUser, onSave }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState<TaskStatus | ''>('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success'>('idle');
   
   // History Logs State
@@ -36,6 +38,25 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
   const [comments, setComments] = useState<import('../types').Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [isSendingComment, setIsSendingComment] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const incoming = Array.from(e.target.files);
+      setSelectedFiles(prev => {
+        const combined = [...prev, ...incoming];
+        if (combined.length > 15) {
+          alert('每次最多可上傳 15 個檔案，已為您保留前 15 個。');
+          return combined.slice(0, 15);
+        }
+        return combined;
+      });
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
 
   useEffect(() => {
     if (task && isOpen) {
@@ -50,10 +71,9 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
     try {
       const userEmail = currentUser?.email || '';
       const token = currentUser?.password || '';
-      const response = await fetch(`${APP_CONFIG.SCRIPT_URL}?action=getTaskLogs&uid=${uid}&userEmail=${encodeURIComponent(userEmail)}&token=${encodeURIComponent(token)}`);
-      const data = await response.json();
+      const { ok, data } = await fetchJsonSafe(`${APP_CONFIG.SCRIPT_URL}?action=getTaskLogs&uid=${encodeURIComponent(uid)}&userEmail=${encodeURIComponent(userEmail)}&token=${encodeURIComponent(token)}`);
       
-      if (data.success && Array.isArray(data.logs)) {
+      if (ok && data?.success && Array.isArray(data.logs)) {
         const sortedLogs = data.logs.sort((a: AuditLog, b: AuditLog) => 
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         );
@@ -73,9 +93,8 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
     try {
       const userEmail = currentUser?.email || '';
       const token = currentUser?.password || '';
-      const response = await fetch(`${APP_CONFIG.SCRIPT_URL}?action=getComments&taskUid=${uid}&userEmail=${encodeURIComponent(userEmail)}&token=${encodeURIComponent(token)}`);
-      const data = await response.json();
-      if (data.success && Array.isArray(data.comments)) {
+      const { ok, data } = await fetchJsonSafe(`${APP_CONFIG.SCRIPT_URL}?action=getComments&taskUid=${encodeURIComponent(uid)}&userEmail=${encodeURIComponent(userEmail)}&token=${encodeURIComponent(token)}`);
+      if (ok && data?.success && Array.isArray(data.comments)) {
         setComments(data.comments.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
       } else {
         setComments([]);
@@ -89,7 +108,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
     if (!newComment.trim() || !currentUser || !task) return;
     setIsSendingComment(true);
     try {
-      const response = await fetch(APP_CONFIG.SCRIPT_URL, {
+      const { ok, data: result, error } = await fetchJsonSafe(APP_CONFIG.SCRIPT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
@@ -101,12 +120,11 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
           content: newComment
         })
       });
-      const result = await response.json();
-      if (result.success) {
+      if (ok && result?.success) {
         setNewComment('');
         fetchComments(task.uid);
       } else {
-        alert('留言失敗: ' + result.msg);
+        alert('留言失敗: ' + (result?.msg || error || '未知錯誤'));
       }
     } catch (error) {
       alert('連線錯誤');
@@ -159,30 +177,29 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
     setIsSubmitting(true);
 
     try {
-      let fileData = undefined;
+      let filesData: { name: string, type: string, content: string }[] | undefined = undefined;
       
-      if (selectedFile) {
-        if (selectedFile.size > 10 * 1024 * 1024) {
-          alert("檔案過大，請選擇 10MB 以下的檔案。");
-          setIsSubmitting(false);
-          return;
-        }
-        
-        const base64Content = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.readAsDataURL(selectedFile);
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = (error) => reject(error);
-        });
+      if (selectedFiles.length > 0) {
+        filesData = await Promise.all(
+          selectedFiles.map(async (file) => {
+            const base64Content = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.readAsDataURL(file);
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = (error) => reject(error);
+            });
 
-        fileData = {
-          name: selectedFile.name,
-          type: selectedFile.type,
-          content: base64Content
-        };
+            return {
+              name: file.name,
+              type: file.type,
+              content: base64Content
+            };
+          })
+        );
       }
 
-      await onSave(task.uid, selectedStatus as TaskStatus, task.attachmentUrl, fileData);
+      const primaryFile = filesData && filesData.length > 0 ? filesData[0] : undefined;
+      await onSave(task.uid, selectedStatus as TaskStatus, task.attachmentUrl, primaryFile, filesData);
 
       setUploadStatus('success');
       // Refresh history after save
@@ -191,7 +208,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
       setTimeout(() => {
         onClose();
         setUploadStatus('idle');
-        setSelectedFile(null);
+        setSelectedFiles([]);
       }, 1500);
 
     } catch (error) {
@@ -267,28 +284,35 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
             </h4>
             
             {task.attachmentUrl ? (
-              <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors bg-white">
-                <div className="flex items-center space-x-3 overflow-hidden">
-                  <div className="p-2 bg-gray-100 rounded">
-                    <FileText className="w-6 h-6 text-gray-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                       {isBase64 ? '已上傳之佐證檔案' : '外部連結檔案'}
-                    </p>
-                    <p className="text-xs text-gray-400">點擊按鈕開啟連結</p>
-                  </div>
-                </div>
-                <a 
-                  href={task.attachmentUrl}
-                  download={isBase64 ? `proof_${task.uid}` : undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors whitespace-nowrap"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  開啟檢視
-                </a>
+              <div className="space-y-2">
+                {task.attachmentUrl.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map((url, uIdx) => {
+                  const urlIsBase64 = url.startsWith('data:');
+                  return (
+                    <div key={uIdx} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors bg-white">
+                      <div className="flex items-center space-x-3 overflow-hidden">
+                        <div className="p-2 bg-gray-100 rounded shrink-0">
+                          <FileText className="w-5 h-5 text-gray-500" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {urlIsBase64 ? `已上傳之佐證檔案 (${uIdx + 1})` : `附件檔案 (${uIdx + 1})`}
+                          </p>
+                          <p className="text-xs text-gray-400 truncate max-w-xs">{url}</p>
+                        </div>
+                      </div>
+                      <a 
+                        href={url}
+                        download={urlIsBase64 ? `proof_${task.uid}_${uIdx + 1}` : undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-200 transition-colors whitespace-nowrap shrink-0 ml-2"
+                      >
+                        <Download className="w-3.5 h-3.5 mr-1" />
+                        開啟檢視
+                      </a>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-4 bg-gray-50 rounded-lg border border-dashed border-gray-300">
@@ -415,13 +439,44 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ task, isOpen, onClose
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1">上傳佐證檔案 (圖片或PDF)</label>
-                <input 
-                  type="file" 
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  accept="image/*,.pdf,.doc,.docx"
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
-                />
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs font-bold text-gray-500">上傳佐證檔案 (圖片、PDF 或 Word)</label>
+                  <span className="text-xs text-blue-600 font-medium">
+                    {selectedFiles.length > 0 ? `已選取 ${selectedFiles.length}/15 個` : '最多 15 個，不限大小'}
+                  </span>
+                </div>
+                {selectedFiles.length < 15 && (
+                  <input 
+                    type="file" 
+                    multiple
+                    onChange={handleFileChange}
+                    accept="image/*,.pdf,.doc,.docx"
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
+                  />
+                )}
+                {selectedFiles.length > 0 && (
+                  <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
+                    {selectedFiles.map((file, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 bg-white rounded border border-blue-100 text-xs shadow-xs">
+                        <div className="flex items-center space-x-2 truncate">
+                          <FileText className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          <span className="font-medium text-gray-800 truncate">{file.name}</span>
+                          <span className="text-gray-400 shrink-0">
+                            ({file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : `${(file.size / 1024).toFixed(1)} KB`})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFile(idx)}
+                          className="text-gray-400 hover:text-red-500 ml-2 shrink-0 p-1"
+                          title="移除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <button
